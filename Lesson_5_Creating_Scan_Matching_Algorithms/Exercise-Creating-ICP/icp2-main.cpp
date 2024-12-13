@@ -93,11 +93,21 @@ vector<int> NN(PointCloudT::Ptr target, PointCloudT::Ptr source, Eigen::Matrix4d
 	// E.G. source index 0 -> target index 32, source index 1 -> target index 5, source index 2 -> target index 17, ... 
 
 	// TODO: create a KDtree with target as input
-
+	pcl::KdTreeFLANN<PointT> kdtree;
+	kdtree.setInputCloud(target);
 	// TODO: transform source by initTransform
-
+	PointCloudT::Ptr transformSource (new PointCloudT);
+	pcl::transformPointCloud(*source , *transformSource , initTransform)
 	// TODO loop through each transformed source point and using the KDtree find the transformed source point's nearest target point. Append the nearest point to associaitons 
-
+	for(PointT point:transformSource->points){
+		vector<int> pointIdxRadiusSearch;
+		vector<float> pointRadiusSquaredDistance;
+		if(kdtree.radiusSearch(*point , dist , pointIdxRadiusSearch , pointRadiusSquaredDistance) > 0){
+			associations.push_back(pointIdxRadiusSearch[0]);
+		}else{
+			associations.push_back(-1);
+		}
+	}
 	return associations;
 }
 
@@ -106,16 +116,58 @@ vector<Pair> PairPoints(vector<int> associations, PointCloudT::Ptr target, Point
 	vector<Pair> pairs;
 
 	// TODO: loop through each source point and using the corresponding associations append a Pair of (source point, associated target point)
+	int index = 0;
+	for(PointT point:source->points){
+		int i = associations[index];
+		if(i>0){
+			PointT association = (*target)[i];
+			if(render){
+				viewer->removeShape(to_string(index)); // remove object name from viewer so can be used next time. An error message appears if trying to add it and its already contained.
+				renderRay(viewer, Point(point.x, point.y,0), Point(association.x, association.y,0), to_string(index), Color(0,1,0)); // render the associations line segments
+			}
+			pairs.push_back(Pair(Point(point.x, point.y,0), Point(association.x, association.y,0)));
+		}
+		index++;
+	}
 
 	return pairs;
 }
 
 Eigen::Matrix4d ICP(vector<int> associations, PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations, pcl::visualization::PCLVisualizer::Ptr& viewer){
 
-  	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity();
-
+  	Eigen::Matrix4d init_transform = transform3D(startingPose.rotation.yaw , startingPose.rotation.pitch , startingPose.rotation.roll , startingPose.position.x , startingPose.position.y , startingPose.position.z)
+	PointCloudT::Ptr transformSource (new PointCloudT);
+	pcl::transformPointCloud(*source , *transformSource , init_transform);
   	// TODO: transform source by startingPose
-  
+	vector<Pair> pairPoints = pairPoints(associations , target , transformSource ,true , viewer);
+	Eigen::MatrixXd P(2,1);
+	P << Eigen::MatrixXd::Zero(2,1);
+	Eigen::MatrixXd Q(2,1);
+	Q << Eigen::MatrixXd::Zero(2,1);
+	Eigen::MatrixXd X(2,pairPoints.size());
+	Eigen::MatrixXd Y(2,pairPoints.size());
+	for(Pair pair: pairPoints){
+		P(0,0) += pair.p1.x;
+		P(1,0) += pair.p1.y;
+
+		Q(0,0) += pair.p2.x;
+		Q(1,0) += pair.p2.y;
+
+	}
+
+	P(0,0) = P(0,0)/pairPoints.size();
+	P(1,0) = P(1,0)/pairPoints.size();
+	Q(0,0) = Q(0,0)/pairPoints.size();
+	Q(1,0) = Q(1,0)/pairPoints.size();
+	int index = 0;
+	for (Pair pair : pairPoints){
+		X(0,index) = pair.p1.x - P(0,0);
+		X(1,index) = pair.p1.y - P(1,0);
+
+		Y(0,index) = pair.p2.x - Q(0,0);
+		Y(1,index) = pair.p2.y - Q(1,0);
+		index++;
+	}
   	// TODO: create matrices P and Q which are both 2 x 1 and represent mean point of pairs 1 and pairs 2 respectivley.
   	// In other words P is the mean point of source and Q is the mean point target 
   	// P = [ mean p1 x] Q = [ mean p2 x]
@@ -126,18 +178,33 @@ Eigen::Matrix4d ICP(vector<int> associations, PointCloudT::Ptr target, PointClou
   	// X = [p1 x0 , p1 x1 , p1 x2 , .... , p1 xn ] - [Px]   Y = [p2 x0 , p2 x1 , p2 x2 , .... , p2 xn ] - [Qx]
   	//     [p1 y0 , p1 y1 , p1 y2 , .... , p1 yn ]   [Py]       [p2 y0 , p2 y1 , p2 y2 , .... , p2 yn ]   [Qy]
 
+	Eigen::MatrixXd S = X*Y.transpose();
   	// TODO: create matrix S using equation 3 from the svd_rot.pdf. Note W is simply the identity matrix because weights are all 1
 
+	JacobiSVD<MatrixXd> svd(S , ComputeFullV | ComputeFullU);
+	Eigen::MatrixXd D;
+	D.setIdentity(svd.matrixV.cols() , svd.matrixV.cols());
+	D(svd.matrixV.cols() -1 , svd.matrixV.cols() - 1) = (svd.matrixV * svd.matrixU.transpose()).determinant();
+	Eigen::MatrixXd R = svd.matrixV*D*svd.matrixU.transpose();
   	// TODO: create matrix R, the optimal rotation using equation 4 from the svd_rot.pdf and using SVD of S
 
+	Eigen::MatrixXd t = Q - R*P;
   	// TODO: create mtarix t, the optimal translatation using equation 5 from svd_rot.pdf
 
+	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity();
+	transformation_matrix(0,0) = R(0,0);
+	transformation_matrix(0,1) = R(0,1);
+	transformation_matrix(1,0) = R(1,0);
+	transformation_matrix(1,1) = R(1,1);
+	transformation_matrix(0,3) = t(0,0);
+	transformation_matrix(1,3) = R(1,0);
   	// TODO: set transformation_matrix based on above R, and t matrices
   	// [ R R 0 t]
   	// [ R R 0 t]
   	// [ 0 0 1 0]
   	// [ 0 0 0 1]
-
+	
+	transformation_matrix = transformation_matrix * init_transform;
   	return transformation_matrix;
 
 }
