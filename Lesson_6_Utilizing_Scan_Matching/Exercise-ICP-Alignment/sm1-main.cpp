@@ -67,15 +67,16 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
 Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations){
 
   	Eigen::Matrix4d init_transform = transform3D(startingPose.rotation.yaw , startingPose.rotation.pitch , startingPose.rotation.roll , startingPose.position.x , startingPose.position.y , startingPose.position.z)
-	PointCloudT::Ptr transformSource;
-	pcl::transformPointCloud(*source , *transformSource , *init_transform);
+	PointCloudT::Ptr transformSource(new PointCloudT);
+	pcl::transformPointCloud(*source , *transformSource , init_transform);
   	// TODO: Implement the PCL ICP function and return the correct transformation matrix
   	// .....
-  	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+  	pcl::IterativeClosestPoint<PointT, PointT> icp;
 	icp.setInputSource(transformSource);
 	icp.setInputTarget(target);
 	PointCloudT::Ptr icp_ptr (new PointCloudT);
 	icp.setMaximumIterations (iterations);
+	icp.setMaxCorrespondenceDistance(0.05f);
 	icp.align(*icp_ptr);
 
 	if(icp.hasConverged()){
@@ -182,7 +183,8 @@ int main(){
 	// ......
 	pcl::VoxelGrid<PointT> vg;
 	vg.setInputCloud(*scanCloud);
-	vg.setLeafSize(1.0f , 1.0f, 1.0f)
+	double filterRes = 0.5;
+	vg.setLeafSize(filterRes, filterRes, filterRes);
 	vg.filter(cloudFiltered);
 	PointCloudT::Ptr transformed_scan (new PointCloudT);
 	Tester tester;
