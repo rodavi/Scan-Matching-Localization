@@ -66,13 +66,27 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
 
 Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations){
 
-  	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity ();
-
+  	Eigen::Matrix4d init_transform = transform3D(startingPose.rotation.yaw , startingPose.rotation.pitch , startingPose.rotation.roll , startingPose.position.x , startingPose.position.y , startingPose.position.z)
+	PointCloudT::Ptr transformSource;
+	pcl::transformPointCloud(*source , *transformSource , *init_transform);
   	// TODO: Implement the PCL ICP function and return the correct transformation matrix
   	// .....
-  	
-  	return transformation_matrix;
+  	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+	icp.setInputSource(transformSource);
+	icp.setInputTarget(target);
+	PointCloudT::Ptr icp_ptr (new PointCloudT);
+	icp.setMaximumIterations (iterations);
+	icp.align(*icp_ptr);
 
+	if(icp.hasConverged()){
+		std::cout<<"\nICP has converged" << icp.getFitnessScore() <<std::endl;
+		Eigen::Matrix4d transformation_matrix = inp.getFinalTransformation().cast()<double>;
+		transformation_matrix = transformation_matrix * init_transform;
+		return transformation_matrix;
+	}
+	cout << "Warning did not converge" << endl;
+	
+	return transformation_matrix;
 }
 
 void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::PCLVisualizer::Ptr& viewer){
@@ -164,10 +178,12 @@ int main(){
 
 	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
 
-	cloudFiltered = scanCloud; // TODO: remove this line
 	//TODO: Create voxel filter for input scan and save to cloudFiltered
 	// ......
-
+	pcl::VoxelGrid<PointT> vg;
+	vg.setInputCloud(*scanCloud);
+	vg.setLeafSize(1.0f , 1.0f, 1.0f)
+	vg.filter(cloudFiltered);
 	PointCloudT::Ptr transformed_scan (new PointCloudT);
 	Tester tester;
 
@@ -177,7 +193,7 @@ int main(){
 
 		if( matching != Off){
 			if( matching == Icp)
-				transform = ICP(mapCloud, cloudFiltered, pose, 0); //TODO: change the number of iterations to positive number
+				transform = ICP(mapCloud, cloudFiltered, pose, 100); //TODO: change the number of iterations to positive number
   			pose = getPose(transform);
 			if( !tester.Displacement(pose) ){
 				if(matching == Icp)
