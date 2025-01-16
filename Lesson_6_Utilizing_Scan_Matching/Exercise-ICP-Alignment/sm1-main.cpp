@@ -66,13 +66,28 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
 
 Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations){
 
-  	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity ();
-
+  	Eigen::Matrix4d init_transform = transform3D(startingPose.rotation.yaw , startingPose.rotation.pitch , startingPose.rotation.roll , startingPose.position.x , startingPose.position.y , startingPose.position.z)
+	PointCloudT::Ptr transformSource(new PointCloudT);
+	pcl::transformPointCloud(*source , *transformSource , init_transform);
   	// TODO: Implement the PCL ICP function and return the correct transformation matrix
   	// .....
-  	
-  	return transformation_matrix;
+  	pcl::IterativeClosestPoint<PointT, PointT> icp;
+	icp.setInputSource(transformSource);
+	icp.setInputTarget(target);
+	PointCloudT::Ptr icp_ptr (new PointCloudT);
+	icp.setMaximumIterations (iterations);
+	icp.setMaxCorrespondenceDistance(0.05f);
+	icp.align(*icp_ptr);
 
+	if(icp.hasConverged()){
+		std::cout<<"\nICP has converged" << icp.getFitnessScore() <<std::endl;
+		Eigen::Matrix4d transformation_matrix = inp.getFinalTransformation().cast()<double>;
+		transformation_matrix = transformation_matrix * init_transform;
+		return transformation_matrix;
+	}
+	cout << "Warning did not converge" << endl;
+	
+	return transformation_matrix;
 }
 
 void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::PCLVisualizer::Ptr& viewer){
@@ -149,25 +164,30 @@ int main(){
 	viewer->setCameraPosition(pose.position.x, pose.position.y, 60, pose.position.x+1, pose.position.y+1, 0, 0, 0, 1);
 
 	// Load map and display it
-	PointCloudT::Ptr mapCloud(new PointCloudT);
-  	pcl::io::loadPCDFile("map.pcd", *mapCloud);
+	PPointCloudT::Ptr mapCloud(new PointCloudT);
+  	if (pcl::io::loadPCDFile("map.pcd", *mapCloud) == -1) //* load the file
+  	{
+    	PCL_ERROR ("Couldn't read file \n");
+  	}
   	cout << "Loaded " << mapCloud->points.size() << " data points from map.pcd" << endl;
+	
 	renderPointCloud(viewer, mapCloud, "map", Color(0,0,1)); 
 
 	// True pose for the input scan
 	vector<Pose> truePose ={Pose(Point(2.62296,0.0384164,0), Rotate(6.10189e-06,0,0)), Pose(Point(4.91308,0.0732088,0), Rotate(3.16001e-05,0,0))};
+	vector<PointCloudT::Ptr> scans;
+	loadScans(scans, 1);
 	drawCar(truePose[0], 0,  Color(1,0,0), 0.7, viewer);
 
-	// Load input scan
-	PointCloudT::Ptr scanCloud(new PointCloudT);
-  	pcl::io::loadPCDFile("scan1.pcd", *scanCloud);
 
-	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
-
-	cloudFiltered = scanCloud; // TODO: remove this line
 	//TODO: Create voxel filter for input scan and save to cloudFiltered
 	// ......
-
+	pcl::VoxelGrid<PointT> vg;
+  	vg.setInputCloud(scans[0]);
+	double filterRes = 0.5;
+  	vg.setLeafSize(filterRes, filterRes, filterRes);
+	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
+  	vg.filter(*cloudFiltered);
 	PointCloudT::Ptr transformed_scan (new PointCloudT);
 	Tester tester;
 
@@ -177,7 +197,7 @@ int main(){
 
 		if( matching != Off){
 			if( matching == Icp)
-				transform = ICP(mapCloud, cloudFiltered, pose, 0); //TODO: change the number of iterations to positive number
+				transform = ICP(mapCloud, cloudFiltered, pose, 100); //TODO: change the number of iterations to positive number
   			pose = getPose(transform);
 			if( !tester.Displacement(pose) ){
 				if(matching == Icp)

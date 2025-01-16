@@ -13,10 +13,27 @@ using namespace std;
 
 Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations){
 
-	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity ();
-
+	Eigen::Matrix4d init_transform = transform2D(startingPose.theta , startingPose.position.x , startingPose.position.y);
 	//TODO: complete the ICP function and return the corrected transform
+	PointCloudT::Ptr transformSource (new PointCloudT);
+	pcl::transformPointCloud (*source, transformSource ,  init_transform );
 
+	pcl::InterativeClosestPoint<PointT , PointT> icp;
+	icp.setInputSource(transformSource);
+	icp.setInputTraget(target);
+	PointCloudT::Ptr icp_ptr (new PointCloudT);
+	icp.setMaximumIterations (iterations);
+	icp.align(*icp_ptr);
+
+	if(icp.hasConverged()){
+		std::cout<<"\nICP has converged" << icp.getFitnessScore() <<std::endl;
+		transformation_matrix = icp.getFinalTransformation().cast<double>;
+		transformation_matrix = transformation_matrix * init_transform;
+		return transformation_matrix;
+	}
+
+	cout << "Warning did not converge" << endl;
+	
 	return transformation_matrix;
 
 }
@@ -92,16 +109,18 @@ int main(){
 		renderPointCloud(viewer, scan, "scan_"+to_string(count), Color(1,0,0)); // render scan
 		 
 		// perform localization
-		Eigen::Matrix4d transform = ICP(map, scan, location, 0); //TODO: make the iteration count greater than zero
+		Eigen::Matrix4d transform = ICP(map, scan, location, 100); //TODO: make the iteration count greater than zero
 		Pose estimate = getPose(transform);
 		// TODO: save estimate location and use it as starting pose for ICP next time
-		
+		location = estimate;
 		locator->points.push_back(PointT(estimate.position.x, estimate.position.y, 0));
 		
 		// view transformed scan
 		// TODO: perform the transformation on the scan using transform from ICP
 		// TODO: render the correct scan
-		
+		ptr::PointCloudT scan_transform (new PointCloudT)
+		pcl::transformPointCloud (*scan , *scan_transform, transform );
+		renderPointCloud(viewer , scan_transform , "icp_scan"+to_string(count) , Color(0,1,0))
 		count++;
 	}
 
