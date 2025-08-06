@@ -60,3 +60,7 @@ If you encounter core dump on start up, just rerun and try again. Crash doesn't 
 Here is a glimpse of the running project.
 
 ![a glimpse of the running project](../../assets/L7_Project.png)
+
+Here is a screenshot of the result of the project after the TODOs were completed
+
+![](../../assets/passed_localization.png)
