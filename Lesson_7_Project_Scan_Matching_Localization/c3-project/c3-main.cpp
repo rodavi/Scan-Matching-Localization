@@ -98,6 +98,22 @@ void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::
     box.cube_height = 2;
 	renderBox(viewer, box, num, color, alpha);
 }
+Eigen::Matrix4d NDT(PointCloudT::Ptr mapCloud, PointCloudT::Ptr source, Pose pose, int iterations){
+
+	Eigen::Matrix4f init_guess =  transform3D(pose.rotation.yaw, pose.rotation.pitch, pose.rotation.roll, pose.position.x, pose.position.y, pose.position.z).cast<float>();
+	pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
+	ndt.setTransformationEpsilon(0.0001);
+	ndt.setStepSize(0.1);
+	ndt.setResolution(1);
+	ndt.setMaximumIterations(iterations);
+	ndt.setInputSource(source);
+	ndt.setInputTarget(mapCloud);
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_ndt(new pcl::PointCloud<pcl::PointXYZ>);
+	ndt.align(*cloud_ndt, init_guess);
+
+	Eigen::Matrix4d transform = ndt.getFinalTransformation().cast<double>();
+	return transform;
+}
 
 int main(){
 
@@ -201,15 +217,27 @@ int main(){
 			
 			new_scan = true;
 			// TODO: (Filter scan using voxel filter)
-
+			pcl::VoxelGrid<PointT> vg;
+			vg.setInputCloud(scanCloud);
+			double filterRes{0.5};
+			vg.setLeafSize(filterRes, filterRes, filterRes);
+			//pcl::PointCloud<PointT>::Ptr cloudFiltered(new pcl::PointCloud<PointT>);
+			vg.filter(*cloudFiltered);
+			
 			// TODO: Find pose transform by using ICP or NDT matching
 			//pose = ....
-
+			pose = Pose(Point(vehicle->GetTransform().location.x, vehicle->GetTransform().location.y, vehicle->GetTransform().location.z), Rotate(vehicle->GetTransform().rotation.yaw * pi/180, vehicle->GetTransform().rotation.pitch * pi/180, vehicle->GetTransform().rotation.roll * pi/180)) - poseRef;
+			
+			Eigen::Matrix4d transform = NDT(mapCloud, cloudFiltered, pose, 3);
+	
+			pose = getPose(transform);
 			// TODO: Transform scan so it aligns with ego's actual pose and render that scan
-
+			PointCloudT::Ptr transformed_scan(new PointCloudT);
+			pcl::transformPointCloud(*cloudFiltered, *transformed_scan, transform);
+			//poseRef = transform*poseRef;
 			viewer->removePointCloud("scan");
 			// TODO: Change `scanCloud` below to your transformed scan
-			renderPointCloud(viewer, scanCloud, "scan", Color(1,0,0) );
+			renderPointCloud(viewer, transformed_scan, "scan", Color(1,0,0) );
 
 			viewer->removeAllShapes();
 			drawCar(pose, 1,  Color(0,1,0), 0.35, viewer);
